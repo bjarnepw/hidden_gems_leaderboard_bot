@@ -19,19 +19,17 @@ import requests
 # Own modules
 from helper_scripts.asset_access import language_logos, get_lang_icon, get_twemoji_image
 from helper_scripts.data_functions import load_bot_data
-from helper_scripts.globals import BASE_DIR
+from helper_scripts.globals import BASE_DIR, LOCAL_DATA_PATH_DIR
 
 
 FONTS_DIR = BASE_DIR / "fonts"
-LOCAL_DATA = BASE_DIR / "local_data"
-OUTPUT_DIR = LOCAL_DATA / "generated_tables"
-BOT_DATA_PATH = BASE_DIR / "bot_data.json"
+GENERATED_TABLES_DIR = LOCAL_DATA_PATH_DIR / "generated_tables"
 TEXT_FONT_PATH = FONTS_DIR / "DejaVuSans.ttf"
-HTML_FILE = LOCAL_DATA / "leaderboard.html"
-JSON_FILE = LOCAL_DATA / "leaderboard.json"
+HTML_FILE_PATH = LOCAL_DATA_PATH_DIR / "leaderboard.html"
+JSON_FILE_PATH = LOCAL_DATA_PATH_DIR / "leaderboard.json"
 
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(GENERATED_TABLES_DIR, exist_ok=True)
 
 
 # MARK: generate_images_from_json()
@@ -152,7 +150,7 @@ def generate_images_from_json(
 
             y += LINE_HEIGHT
 
-        file_path = os.path.join(OUTPUT_DIR, f"leaderboard_part_{i + 1}.png")
+        file_path = os.path.join(GENERATED_TABLES_DIR, f"leaderboard_part_{i + 1}.png")
         img.save(file_path)
         images.append(file_path)
 
@@ -251,7 +249,7 @@ def parse_html_to_json(html: str) -> list[dict]:
         return []
 
     # Save raw HTML
-    with open(HTML_FILE, "w", encoding="utf-8") as f:
+    with open(HTML_FILE_PATH, "w", encoding="utf-8") as f:
         f.write(str(table))
 
     headers = [
@@ -318,7 +316,7 @@ def parse_html_to_json(html: str) -> list[dict]:
         leaderboard_json.append(entry)
 
     # Save JSON
-    with open(JSON_FILE, "w", encoding="utf-8") as f:
+    with open(JSON_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump(leaderboard_json, f, ensure_ascii=False, indent=2)
 
     return leaderboard_json
