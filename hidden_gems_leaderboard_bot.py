@@ -6,7 +6,12 @@ import json
 import socket
 from pathlib import Path
 
+
+
 # Third-party imports
+
+import certifi
+
 import discord
 from discord.ext import commands
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,6 +26,12 @@ from helper_scripts.helper_functions import (
     send_leaderboard,
 )
 from helper_scripts.globals import DOTENV_PATH, LOCAL_DATA_PATH_DIR
+
+
+
+# Setze die Umgebungsvariable, die requests anweist, diese CA-Zertifikate zu verwenden
+os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+os.environ['SSL_CERT_FILE'] = certifi.where() 
 
 
 BOT_DATA_FILE = LOCAL_DATA_PATH_DIR / "bot_data.json"
