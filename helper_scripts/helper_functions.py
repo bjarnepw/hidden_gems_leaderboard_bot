@@ -34,7 +34,7 @@ os.makedirs(GENERATED_TABLES_DIR, exist_ok=True)
 
 # MARK: generate_images_from_json()
 def generate_images_from_json(
-    leaderboard_json: list[dict], top_x: int | None = None
+    leaderboard_json: list[dict], top_x=-1 | None = None
 ) -> list[str]:
     """Generate one or more PNG images from the leaderboard JSON."""
 
@@ -50,7 +50,7 @@ def generate_images_from_json(
     text_font = ImageFont.truetype(TEXT_FONT_PATH, 18)
 
     # slice top_x rows if provided
-    rows = leaderboard_json[:top_x] if top_x else leaderboard_json
+    rows = leaderboard_json[:top_x] if top_x >= 0 else leaderboard_json
     total_rows = len(rows)
 
     num_images = math.ceil(total_rows / MAX_ROWS_PER_IMAGE)
@@ -169,12 +169,13 @@ def fit_text_to_column(draw, text, font, max_width):
 
 # MARK: send_table_images()
 async def send_table_images(
-    channel, status_msg, leaderboard_json, top_x, title: str | None = None
+    channel, status_msg, leaderboard_json, top_x=-1, title: str | None = None
 ):
     await status_msg.edit(content="📊 Generating leaderboard images...")
-
-    image_paths = generate_images_from_json(leaderboard_json, top_x)
-
+    if top_x >= 0:
+        image_paths = generate_images_from_json(leaderboard_json, top_x)
+    else:
+        image_paths = generate_images_from_json(leaderboard_json)
     # Build title message
     header = ""
     if title:
@@ -184,9 +185,16 @@ async def send_table_images(
         header += f"\n**(Top {top_x})**"
 
     await status_msg.edit(content=header)
-
+    counter = 0
     for path in image_paths:
-        await channel.send(file=discord.File(path))
+        if counter < 3:
+            await channel.send(file=discord.File(path))
+        elif counter == 3:
+            message = await channel.send(file=discord.File(path))
+            thread = await message.create_thread(name="Rest der Leaderboards")
+        else:
+            await thread.send(file=discord.File(path))
+        counter += 1
 
 
 # MARK: extract_leaderboard_meta()
@@ -396,7 +404,7 @@ async def send_table_texts(
     lines = json_to_text_table(leaderboard_json)
 
     # Slice lines if top_x is set (keep header + spacer lines)
-    if top_x:
+    if top_x >= 0:
         lines = lines[: top_x + 2]  # +2 to include header + spacer
 
     # Build title message
