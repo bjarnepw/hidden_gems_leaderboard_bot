@@ -16,7 +16,7 @@ import pytz
 from dotenv import load_dotenv
 
 # Own custom scripts / modules
-from helper_scripts.registry import register_commands  # <--- NEW: Imports the async registry
+from helper_scripts.registry import register_commands  
 from helper_scripts.helper_functions import (
     post_lb_in_scheduled_channels,
     send_leaderboard,
