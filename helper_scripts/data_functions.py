@@ -37,32 +37,67 @@ def get_guild_data(guild_id: int) -> dict:
 
     guild_id_str = str(guild_id)
 
-    # Create empty structure if missing
+    # Create empty structure if missing, including the new voting list
     if guild_id_str not in guilds:
-        guilds[guild_id_str] = {"tracked_bots": [], "scheduled_channels": []}
+        guilds[guild_id_str] = {
+            "tracked_bots": [], 
+            "scheduled_channels": [],
+            # NEW: Field for voting tracking
+            "tracked_voting_bots": [] 
+        }
         save_bot_data(data)
 
     return guilds[guild_id_str]
 
 
-def set_guild_data(guild_id: int, guild_dict: dict):
-    """Write the updated guild data back into bot_data.json."""
+# MARK: Tracked Bots
+def _get_tracking_key(mode: str) -> str:
+    """Returns the key for the tracked list based on mode, defaults to 'tracked_bots'."""
+    if mode.lower() == "voting":
+        return "tracked_voting_bots"
+    # Default key for existing functionality
+    return "tracked_bots" 
+
+def get_tracked_bots(guild_id: int, mode: str = "leaderboard") -> list[dict]:
+    """Return the list of tracked bots for a specific guild ID and tracking mode.
+    Mode can be 'leaderboard' (default) or 'voting'."""
+    guild_data = get_guild_data(guild_id)
+    return guild_data.get(_get_tracking_key(mode), [])
+
+def set_tracked_bots(guild_id: int, tracked: list[dict], mode: str = "leaderboard"):
+    """Write the updated tracked bots list back into bot_data.json for a specific mode.
+    Mode can be 'leaderboard' (default) or 'voting'."""
     data = load_bot_data()
     guilds = data.setdefault("guild_data", {})
+    
+    guild_id_str = str(guild_id)
+    
+    # Ensure the guild entry exists (call get_guild_data to initialize if not)
+    # This also ensures the guild data dictionary is present in 'data' before assignment
+    guilds[guild_id_str] = get_guild_data(guild_id)
 
-    guilds[str(guild_id)] = guild_dict
+    guilds[guild_id_str][_get_tracking_key(mode)] = tracked
     save_bot_data(data)
 
 
-# MARK: Tracked Bots
-def get_tracked_bots(guild_id: int) -> List[Dict[str, str]]:
-    """Return the tracked bots for a specific guild."""
-    guild_data = get_guild_data(guild_id)
-    return guild_data.get("tracked_bots", [])
 
+# MARK: Poll Data Management
+def get_polls_path():
+    return LOCAL_DATA_PATH_DIR / "active_polls.json"
 
-def set_tracked_bots(guild_id: int, tracked: List[Dict[str, str]]):
-    """Set the tracked bots list for a specific guild."""
-    guild_data = get_guild_data(guild_id)
-    guild_data["tracked_bots"] = tracked
-    set_guild_data(guild_id, guild_data)
+def load_polls() -> dict:
+    """Loads active polls from JSON."""
+    path = get_polls_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return {}
+
+def save_polls(data: dict):
+    """Saves active polls to JSON."""
+    path = get_polls_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)

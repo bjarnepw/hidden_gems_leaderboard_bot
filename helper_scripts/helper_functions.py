@@ -5,8 +5,7 @@ import os
 import json
 import math
 import re
-from typing import Optional, Dict, Any
-
+from typing import Optional, Dict, Any, List
 
 # Third-party imports
 import discord
@@ -15,12 +14,10 @@ from bs4 import BeautifulSoup
 import datetime
 import requests
 
-
 # Own modules
 from helper_scripts.asset_access import language_logos, get_lang_icon, get_twemoji_image
 from helper_scripts.data_functions import load_bot_data
 from helper_scripts.globals import BASE_DIR, LOCAL_DATA_PATH_DIR
-
 
 FONTS_DIR = BASE_DIR / "fonts"
 GENERATED_TABLES_DIR = LOCAL_DATA_PATH_DIR / "generated_tables"
@@ -28,6 +25,8 @@ TEXT_FONT_PATH = FONTS_DIR / "DejaVuSans.ttf"
 HTML_FILE_PATH = LOCAL_DATA_PATH_DIR / "leaderboard.html"
 JSON_FILE_PATH = LOCAL_DATA_PATH_DIR / "leaderboard.json"
 
+# URL for the voting leaderboard (Adjust if necessary)
+VOTING_URL = "https://hiddengems.gymnasiumsteglitz.de/voting" 
 
 os.makedirs(GENERATED_TABLES_DIR, exist_ok=True)
 
@@ -258,14 +257,19 @@ def extract_leaderboard_meta(html: str) -> Dict[str, Any]:
 
 
 # MARK: parse_html_to_json()
-def parse_html_to_json(html: str) -> list[dict]:
+def parse_html_to_json(html: str, file_suffix: str = "") -> list[dict]:
+    """
+    Parses HTML to JSON. 
+    Added file_suffix to distinguish between 'leaderboard.json' and 'leaderboard_voting.json'.
+    """
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
     if not table:
         return []
 
-    # Save raw HTML
-    with open(HTML_FILE_PATH, "w", encoding="utf-8") as f:
+    # Save raw HTML with suffix to avoid overwriting
+    html_file = LOCAL_DATA_PATH_DIR / f"leaderboard{file_suffix}.html"
+    with open(html_file, "w", encoding="utf-8") as f:
         f.write(str(table))
 
     headers = [
@@ -331,8 +335,9 @@ def parse_html_to_json(html: str) -> list[dict]:
 
         leaderboard_json.append(entry)
 
-    # Save JSON
-    with open(JSON_FILE_PATH, "w", encoding="utf-8") as f:
+    # Save JSON with suffix
+    json_file = LOCAL_DATA_PATH_DIR / f"leaderboard{file_suffix}.json"
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump(leaderboard_json, f, ensure_ascii=False, indent=2)
 
     return leaderboard_json
@@ -400,13 +405,33 @@ def get_leaderboard_json() -> tuple[list[dict], dict[str, Any]]:
     # Extract the leaderboard date
     leaderboard_meta = extract_leaderboard_meta(html)
 
-    # Extract the leaderboard JSON
+    # Extract the leaderboard JSON (default file names)
     leaderboard_json = parse_html_to_json(html)
 
     return leaderboard_json, leaderboard_meta
 
 
-# MARK: send_lines_chunked()
+# MARK: get_voting_leaderboard_json()
+def get_voting_leaderboard_json() -> tuple[list[dict], dict[str, Any]]:
+    """Fetches and parses the voting leaderboard."""
+    url = VOTING_URL
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        html = response.text
+    except requests.RequestException as e:
+        return [{"error": f"Fehler beim Abrufen des Voting-Leaderboards: {e}"}], {}
+
+    # Extract the leaderboard date
+    leaderboard_meta = extract_leaderboard_meta(html)
+
+    # Extract the leaderboard JSON (saved with _voting suffix)
+    leaderboard_json = parse_html_to_json(html, file_suffix="_voting")
+
+    return leaderboard_json, leaderboard_meta
+
+
+# MARK: send_table_texts()
 async def send_table_texts(
     channel, status_msg, leaderboard_json, top_x, title: str | None = None
 ):
@@ -455,18 +480,33 @@ def filter_json_tracked(
 
 
 # MARK: send_leaderboard()
-async def send_leaderboard(channel, tracked_bots, top_x, force_text, as_thread):
-    status_msg = await channel.send("*⌛Fetching leaderboards...*")
+async def send_leaderboard(
+    channel, 
+    tracked_bots: List[Dict], 
+    top_x: Optional[int], 
+    force_text: bool, 
+    as_thread: bool, 
+    mode: str = "leaderboard"
+):
+    """
+    Orchestrates sending the leaderboard. 
+    'mode' can be 'leaderboard' (default) or 'voting'.
+    """
+    status_msg = await channel.send(f"*⌛Fetching {mode} data...*")
 
-    if as_thread:
-        # TODO: implement thread posting
-        pass
+    # Fetch data based on mode
+    if mode.lower() == "voting":
+        leaderboard_json, leaderboard_meta = get_voting_leaderboard_json()
+        base_title_str = "# Aktuelles Voting-Leaderboard"
+    else:
+        leaderboard_json, leaderboard_meta = get_leaderboard_json()
+        base_title_str = "# Aktuelles Leaderboard"
 
-    leaderboard_json, leaderboard_meta = get_leaderboard_json()
+    if "error" in leaderboard_json[0]:
+        await status_msg.edit(content=leaderboard_json[0]["error"])
+        return
 
-    # Leaderboard
-
-    # Format the title using metadata (date, seed, stage)
+    # Leaderboard Title Construction
     if leaderboard_meta:
         # Date
         date_str = (
@@ -474,45 +514,48 @@ async def send_leaderboard(channel, tracked_bots, top_x, force_text, as_thread):
             if leaderboard_meta.get("date")
             else "Unbekanntes Datum"
         )
-
         # Stage
         stage_str = (
             f"{leaderboard_meta['stage']}"
             if leaderboard_meta.get("stage") is not None
             else ""
         )
-
-        # Seed
+        # Seed (Likely only relevant for main leaderboard)
         seed_content = leaderboard_meta.get("seed", "")
         seed_raw = seed_content.split("`")[1] if "`" in seed_content else seed_content
-        seed_str = (
-            f"{seed_content}\n-# Command:\n```ruby\nruby runner.rb --seed {seed_raw} --profile [/pfad/zu/deinem/bot]\n```"
-            if seed_content
-            else ""
-        )
+        
+        seed_str = ""
+        if seed_content and mode != "voting":
+             seed_str = f"{seed_content}\n-# Command:\n```ruby\nruby runner.rb --seed {seed_raw} --profile [/pfad/zu/deinem/bot]\n```"
 
-        title = f"# Leaderboard vom {date_str}\n-# {stage_str}\n-# {seed_str}"
+        title = f"{base_title_str} vom {date_str}\n-# {stage_str}\n-# {seed_str}".strip()
     else:
-        title = "# Aktuelles Leaderboard"
+        title = base_title_str
 
+    # Send Full Table
     if force_text:
         await send_table_texts(channel, status_msg, leaderboard_json, top_x, title)
     else:
         await send_table_images(channel, status_msg, leaderboard_json, top_x, title)
 
     # Tracked bots
-    status_msg = await channel.send(f"*⌛Extracting data of tracked Bots...*")
-    title = "**Tracked Bots**"
-    leaderboard_json_tracked = filter_json_tracked(leaderboard_json, tracked_bots)
-    if leaderboard_json_tracked and len(leaderboard_json_tracked) > 0:
-        if force_text:
-            await send_table_texts(
-                channel, status_msg, leaderboard_json_tracked, 0, title
-            )
+    if tracked_bots:
+        status_msg = await channel.send(f"*⌛Extracting data for tracked bots ({mode})...*")
+        title = f"**Tracked Bots ({mode.capitalize()})**"
+        
+        leaderboard_json_tracked = filter_json_tracked(leaderboard_json, tracked_bots)
+        
+        if leaderboard_json_tracked and len(leaderboard_json_tracked) > 0:
+            if force_text:
+                await send_table_texts(
+                    channel, status_msg, leaderboard_json_tracked, 0, title
+                )
+            else:
+                await send_table_images(
+                    channel, status_msg, leaderboard_json_tracked, 0, title
+                )
         else:
-            await send_table_images(
-                channel, status_msg, leaderboard_json_tracked, 0, title
-            )
+            await status_msg.edit(content=f"ℹ️ Keine getrackten Bots im {mode}-Leaderboard gefunden.")
 
 
 # MARK: post_lb_in_scheduled_channels()
@@ -527,7 +570,10 @@ async def post_lb_in_scheduled_channels(bot):
     # Loop through all guilds/DMs
     for guild_id, g_data in guilds.items():
         scheduled_channels = g_data.get("scheduled_channels", [])
-        tracked_bots = g_data.get("tracked_bots", [])
+        
+        # Retrieve both tracking lists
+        tracked_leaderboard_bots = g_data.get("tracked_bots", [])
+        tracked_voting_bots = g_data.get("tracked_voting_bots", [])
 
         if not scheduled_channels:
             continue
@@ -539,11 +585,23 @@ async def post_lb_in_scheduled_channels(bot):
                 print(f"Channel {channel_id} nicht gefunden.")
                 continue
 
-            # DM or guild both fine (TextChannel, Thread, DMChannel)
+            # 1. Post Standard Leaderboard
             await send_leaderboard(
                 channel,
-                tracked_bots=tracked_bots,
-                top_x=0,
+                tracked_bots=tracked_leaderboard_bots,
+                top_x=20, # Default to Top 20 for automated posts
                 force_text=False,
                 as_thread=True,
+                mode="leaderboard"
             )
+
+            # 2. Post Voting Leaderboard (only if there are tracked bots for it)
+            if tracked_voting_bots:
+                await send_leaderboard(
+                    channel,
+                    tracked_bots=tracked_voting_bots,
+                    top_x=20, 
+                    force_text=False,
+                    as_thread=True,
+                    mode="voting"
+                )
